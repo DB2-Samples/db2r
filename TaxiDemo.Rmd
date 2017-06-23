@@ -1,0 +1,256 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+**** This demo is delivered as is.  IBM Corporation is not responsible for the contents of the demo ****
+
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Cmd+Shift+Enter*. 
+
+Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Cmd+Option+I*.
+
+When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Cmd+Shift+K* to preview the HTML file).
+
+```{r}
+install.packages("data.table")
+install.packages("corrplot")
+```
+
+```{r}
+# =====================================
+# load libraries
+# =====================================
+# load ibmdbR library for in-database data manipulation and analytic algorithms in dashDB 
+library(ibmdbR)
+library(ggplot2)
+library(mgcv)
+# load data.tables for local inplace manipulation and group by ops
+library(data.table)
+library(corrplot)
+```
+
+```{r}
+# =====================================
+# Connect to database via ibmdbR
+# =====================================
+
+# Connect to the database
+conn <- idaConnect(dsn = 'TAXIDB', uid='db2inst1', pwd='db2inst1', conType = 'odbc')
+idaInit(con = conn)
+```
+# Number of taxi trips from Madison Square to in JFK:
+```{r}
+# =====================================
+# Taxi data acquisition and preparation
+# =====================================
+
+#Define dashDB data frame for taxi trip data2
+q <- ida.data.frame('TRIP_DATA')
+
+#Select only trips from Madison Square area to JFK
+bdf <- q[(q$PICKUP_LATITUDE>40.759988)&(q$PICKUP_LATITUDE<40.765693)&
+           (q$PICKUP_LONGITUDE>-73.976693)&(-73.9677>q$PICKUP_LONGITUDE)&
+           (q$DROPOFF_LATITUDE>40.628024)&(q$DROPOFF_LATITUDE<40.672566)&
+           (q$DROPOFF_LONGITUDE>-73.858281)&(-73.715544>q$DROPOFF_LONGITUDE)
+         ,]
+
+
+#nrow(bdf)
+
+#Load the taxi data from dashDB into R data frame
+taxi <- as.data.frame(bdf)
+nrow(taxi)
+```
+
+```{r}
+#Preprocess taxi data - Do date / time conversions
+taxi$date <- strptime(taxi$PICKUP_DATETIME,'%Y-%m-%d %H:%M:%S')
+taxi$hour <- format(taxi$date,'%H')
+taxi$min <- format(taxi$date,'%M')
+taxi$dayyear <- as.numeric(format(taxi$date,'%j'))
+taxi$dayweeknum <- format(taxi$date,'%u')
+taxi$dayweek <- format(taxi$date,'%a')
+taxi$day <- as.numeric(format(taxi$date,'%d'))
+taxi$month <- as.numeric(format(taxi$date,'%m'))
+taxi$dayweek <- as.factor(taxi$dayweek)
+taxi$timeofday <- (as.numeric(taxi$hour)*60+as.numeric(taxi$min))/60.0
+taxi$trip_distance <- as.numeric(taxi$TRIP_DISTANCE)
+taxi$trip_time <- as.numeric(taxi$TRIP_TIME_IN_SECS)/60.0
+taxi$avg_mph <- as.numeric(taxi$TRIP_DISTANCE)/as.numeric(taxi$TRIP_TIME_IN_SECS)*3600
+taxi$EST <- format(taxi$date,'%Y-%m-%d')
+```
+# Number of trips after outlier removal
+```{r}
+#Remove outliers
+taxi <- taxi[(taxi$TRIP_DISTANCE>15) & (taxi$TRIP_DISTANCE < 25) & (taxi$trip_time>20),]
+taxi <- taxi[(taxi$trip_time<10000),]
+nrow(taxi)
+```
+# Sample of the trip data:
+```{r}
+taxi.dt <- as.data.table(taxi)
+taxi.dt$date <- NULL # avoid problems with multiple entries
+invisible(taxi.dt[, posixdate := as.POSIXct(strptime(PICKUP_DATETIME,'%Y-%m-%d %H:%M:%OS'), tz = "America/New_York")]) # posix date
+invisible(taxi.dt[, caldate := as.Date(strptime(PICKUP_DATETIME,'%Y-%m-%d %H:%M:%OS'),tz = "America/New_York")]) # calendar date
+invisible(taxi.dt[, weekday := weekdays(posixdate, abbreviate = FALSE)])
+View(taxi.dt)
+```
+#Distribution of Trip Times:
+```{r}
+#Plot trip time
+ggplot(taxi.dt, aes(x=trip_time)) + stat_bin(aes(y=..count../sum(..count..)), bins = 50) + ylab('') + xlab('Trip time (minutes)')
+```
+#Distribution of trip time between IBM Manhattan & JFK per time of the day:
+```{r}
+#Plot trip time depending on time of day
+suppressWarnings(ggplot(taxi.dt, aes(timeofday,trip_time)) + geom_point() + xlab('Time of day (hour)') + ylab('Trip time (minutes)') + geom_smooth() + ylim(0,100)+ xlim(0,23) + geom_rug(col="darkred",alpha=.1))
+```
+#Distribution of trip time for Weekdays only:
+```{r}
+#Weekdays
+ggplot(taxi.dt[(taxi.dt$dayweek!='Sat')&(taxi.dt$dayweek!='Sun'),],aes(timeofday,trip_time)) + geom_point() + xlab('Time of day (hour)') + ylab('Trip time (minutes)') + geom_smooth() + ylim(0,100)+ xlim(0,23) + geom_rug(col="darkred",alpha=.1)
+```
+#Distribution of trip time for Saturdays only:
+```{r}
+#Saturday
+ggplot(taxi.dt[taxi.dt$dayweek=='Sat',],aes(timeofday,trip_time)) + xlab('Time of day (hour)') + ylab('Trip time (minutes)') + geom_point() + geom_smooth() + ylim(0,100) + xlim(0,23) + geom_rug(col="darkred",alpha=.1)
+```
+#Distribution of trip time for Sundays only:
+```{r}
+#Sunday
+ggplot(taxi.dt[taxi.dt$dayweek=='Sun',],aes(timeofday,trip_time)) + xlab('Time of day (hour)') + ylab('Trip time (minutes)') + geom_point() + geom_smooth() + ylim(0,100) + xlim(0,23)+ geom_rug(col="darkred",alpha=.1)
+```
+
+```{r}
+# ========================================
+# Weather data acquisition and preparation
+# ========================================
+
+dfWeatherTWC.dt <- as.data.table(as.data.frame(ida.data.frame('NYCWEATHER2013')))
+#View(head(dfWeatherTWC.dt))
+```
+
+```{r}
+invisible(dfWeatherTWC.dt$HOURLYPRECIP <- as.numeric(dfWeatherTWC.dt$HOURLYPRECIP))
+invisible(dfWeatherTWC.dt$HOURLYPRECIP[is.na(dfWeatherTWC.dt$HOURLYPRECIP)] <- 0.0)
+#invisible(dfWeatherTWC.dt$PRECIP_HRLY <- as.numeric(dfWeatherTWC.dt$PRECIP_HRLY))
+#invisible(dfWeatherTWC.dt$PRECIP_HRLY[is.na(dfWeatherTWC.dt$PRECIP_HRLY)] <- 0.0)
+#invisible(dfWeatherTWC.dt$SNOW_HRLY <- as.numeric(dfWeatherTWC.dt$SNOW_HRLY))
+#invisible(dfWeatherTWC.dt$SNOW_HRLY[is.na(dfWeatherTWC.dt$SNOW_HRLY)] <- 0.0)
+# Create a posixdate so we can do some timezone transformations
+invisible(dfWeatherTWC.dt[, posixdate := as.POSIXct(strptime(MEASUREMENT_DATETIME,'%Y-%m-%d %H:%M:%OS'), tz="GMT")]) # posix date
+# convert to NY time
+invisible(attributes(dfWeatherTWC.dt$posixdate)$tzone <- "America/New_York")
+# Create a timestamp for one hour ahead of reported time because rain etc. is reported cumulative for past hour by TWC
+invisible(dfWeatherTWC.dt$posixdate_one_hour_ahead <- dfWeatherTWC.dt$posixdate - 3600)
+invisible(dfWeatherTWC.dt$posixdate <- dfWeatherTWC.dt$posixdate - 3600)
+# Correct calendar date for the local timezone
+invisible(dfWeatherTWC.dt[, caldate := as.Date(posixdate, tz = "America/New_York")])  # calendar date
+invisible(dfWeatherTWC.dt[, hour := format(posixdate,'%H')]) # hour
+invisible(dfWeatherTWC.dt[, min := format(posixdate,'%M')]) # minute
+invisible(dfWeatherTWC.dt[, weekday := weekdays(posixdate, abbreviate = FALSE)]) # minute
+```
+#Sample of Weather Data for NYC
+```{r}
+head(dfWeatherTWC.dt, 10)
+```
+
+```{r}
+# ============================================
+# Compare date ranges of taxi and weather data
+# ============================================
+#unique(taxi.dt$caldate)[order(unique(taxi.dt$caldate))] # date range of taxi data
+#unique(dfWeatherTWC.dt$caldate)[order(unique(dfWeatherTWC.dt$caldate))] # date range of twc data
+
+# =========================================================================
+# Aggregate taxi and weather data, 1. per day, 2. per hour, 3. per weekday
+# =========================================================================
+
+# aggregate taxi data by date, by date+hour and by weekday + hour
+taxi.dt.agg <- taxi.dt[,list(TotalTrips = sum(month>0), AvgTripDistance = mean(as.numeric(TRIP_DISTANCE)), AvgPassengers = mean(PASSENGER_COUNT), AvgTripTime = mean(trip_time), TotalTripDistance = sum(as.numeric(TRIP_DISTANCE)), TotalPassengers = sum(PASSENGER_COUNT)),by=list(caldate)]
+invisible(taxi.dt.agg[, month := format(caldate,'%m')]) # add month
+invisible(taxi.dt.agg[, day := format(caldate,'%d')]) # add day
+invisible(taxi.dt.agg[, dayyear := as.numeric(format(caldate,'%j'))])
+invisible(taxi.dt.agg[, dayweeknum := format(caldate,'%u')]) 
+
+taxi.dt.aggHour <- taxi.dt[,list(TotalTrips = sum(month>0), AvgTripDistance = mean(as.numeric(TRIP_DISTANCE)), AvgPassengers = mean(PASSENGER_COUNT), AvgTripTime = mean(trip_time), TotalTripDistance = sum(as.numeric(TRIP_DISTANCE)), TotalPassengers = sum(PASSENGER_COUNT)),by=list(caldate, hour)]
+invisible(taxi.dt.aggHour[, month := format(caldate,'%m')]) # add month
+
+taxi.dt.aggWeekday <- taxi.dt[,list(TotalTrips = sum(month>0), AvgTripDistance = mean(as.numeric(TRIP_DISTANCE)), AvgPassengers = mean(PASSENGER_COUNT), AvgTripTime = mean(trip_time), TotalTripDistance = sum(as.numeric(TRIP_DISTANCE)), TotalPassengers = sum(PASSENGER_COUNT)),by=list(weekday, hour)]
+
+# aggregate weather data by date, by date+hour and by weekday + hour
+dfWeatherTWC.dt.agg <- dfWeatherTWC.dt[,list(precipPerDay = sum(as.numeric(HOURLYPRECIP))),by=list(caldate)]
+
+dfWeatherTWC.dt.aggHour <- dfWeatherTWC.dt[,list(precipPerHour = mean(as.numeric(HOURLYPRECIP)), avgTempAtHour = mean(as.numeric(HOURLYDRYBULBTEMPF))),by=list(caldate, hour)]
+
+dfWeatherTWC.dt.aggWeekdayHour <- dfWeatherTWC.dt[,list(precipPerHour = mean(as.numeric(HOURLYPRECIP))),by=list(weekday, hour)]
+
+#summary(dfWeatherTWC.dt)
+```
+#Merged taxi & weather data
+```{r}
+# =====================================================================
+# Merge of taxi data with dfWeatherTWC.dt (both hourly aggregated)
+# =====================================================================
+
+# merge hourly taxidata and hourly dfWeatherTWC.dt
+tw.hourlyAgg <- merge(taxi.dt.aggHour, dfWeatherTWC.dt.aggHour, by.x=c("caldate", "hour"), by.y=c("caldate", "hour"))
+
+# =====================================================================
+# Build a linear model for trip time
+# =====================================================================
+
+#str(tw.hourlyAgg)
+tw.hourlyAgg.num <- tw.hourlyAgg
+tw.hourlyAgg.num$hour <- as.numeric(tw.hourlyAgg.num$hour)
+tw.hourlyAgg.num$month <- as.numeric(tw.hourlyAgg.num$month)
+tw.hourlyAgg.num$caldate <- NULL
+tw.hourlyAgg.num$snowPerHour <- NULL
+library(corrplot)
+M <- cor(tw.hourlyAgg.num, use="pairwise.complete.obs")
+head(M, 20)
+```
+#Correlation analysis:
+```{r}
+corrplot(M, method="circle")
+```
+
+#Build a linear regression ML model:
+```{r}
+# Linear model for trip time
+lm.tw.hourlyAgg.tripTimeNoWeather <- lm(AvgTripTime ~ month + hour, data = tw.hourlyAgg)
+summary(lm.tw.hourlyAgg.tripTimeNoWeather)
+lm.tw.hourlyAgg.tripTimeWithWeather <- lm(AvgTripTime ~ month + hour + precipPerHour + avgTempAtHour, data = tw.hourlyAgg)
+summary(lm.tw.hourlyAgg.tripTimeWithWeather)
+```
+
+#Predicted trip times with and without rain:
+```{r}
+# =====================================================================
+# Test prediction and plot for fictive days with assumed amount of rain
+# =====================================================================
+
+# Predict trip time for a day in february
+month=rep(as.character("2"),24)
+# simulated day prediction
+simulateDay <- function(model) {
+  predDay <- data.frame(month=rep(as.character("02"),24), hour = c(paste("0",0:9,sep=""),as.character(10:23)), precipPerHour = rep(2,24), avgTempAtHour = rep(50,24), stringsAsFactors = FALSE)
+  predDay.pred <- predict(model, predDay)
+  predDay.pred
+}
+
+df.weather <- data.frame("daytime" = 0:23, "prediction" = simulateDay(lm.tw.hourlyAgg.tripTimeWithWeather))
+df.noweather <- data.frame("daytime" = 0:23, "prediction" = simulateDay(lm.tw.hourlyAgg.tripTimeNoWeather))
+
+# Plot predicted trip time with and without assumed weather conditions:
+#ggplot(data = df.weather, aes(x=daytime, y=prediction)) + geom_line() + xlab("Day time (hour)") + ylab("Predicted trip time (minutes)") + ylim(0,200) + ggtitle("Model with weather data") 
+#ggplot(data = df.noweather, aes(x=daytime, y=prediction)) + geom_line() + xlab("Day time (hour)") + ylab("Predicted trip time (minutes)") + ylim(0,200) + ggtitle("Model with weather data")
+```
+# Combined plot
+```{r}
+df.weather.ggplot <- rbind(data.frame(df.weather, "model" = "withWeather"), data.frame(df.noweather, "model" = "withoutWeather"))
+#head(df.weather.ggplot)
+ggplot(data=df.weather.ggplot, aes(x=daytime, y=prediction, color=model)) + geom_line() + xlab("Day time (hour)") + ylab("Predicted trip time (minutes)") + ggtitle("Model comparison") + ylim(0,200)
+```
