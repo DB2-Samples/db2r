@@ -2,7 +2,7 @@
 A Db2 demo using R functions that analyze taxi bookings
 
 ## Description
-The demo links to a Db2 TAXIDB Columnar Store Database.  It then selects trip data that demonstrates taxi times between mid down Manhatten and NYC Airports.  It then uses Weather information to perform predicitions on increased trip time based on weather events.
+The demo links to a Db2 TAXIDB Columnar Store Database.  It then selects trip data that demonstrates taxi times between mid down Manhatten and NYC Airports.  It then uses Weather information to perform predictions on increased trip time based on weather events.
 
 The demo has been tested on Windows 10 environments although other environments also should work. 
 
