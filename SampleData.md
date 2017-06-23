@@ -3,3 +3,6 @@ The data required for the R Taxi demo is found in a box folder due to file size 
 
 The file can be found on box: https://ibm.ent.box.com/file/188069316873. You should not require any logon credentials to download this file.
 
+## Contact
+If you have issues with downloading the file, please contact connomon@us.ibm.com.
+
