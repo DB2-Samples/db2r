@@ -23,3 +23,5 @@ Sample Restore:
 RESTORE DATABASE TAXIDB FROM "/db2fs/backups" TAKEN AT 20170620131623 TO "/db2fs" INTO TAXIDB WITHOUT PROMPTING; 
 
 Connectivity must be set up by installing Data Server Driver and configuring an ODBC Data Source in the ODBC Data Source Administrator (64-bit).  
+
+For details on how to download the sample database, please refer to the SampleData readme.
